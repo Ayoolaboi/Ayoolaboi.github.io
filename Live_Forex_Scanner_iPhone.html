@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Forex AI Scanner Live</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#08101f;color:#eef3ff;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+.wrap{max-width:720px;margin:auto;padding:16px}.card{background:#121b2f;border:1px solid #26324c;border-radius:18px;padding:16px;margin-bottom:12px}
+h1{margin:0 0 4px;font-size:25px}.muted,.small{color:#98a5c0;font-size:13px}.small{font-size:12px}
+label{display:block;font-size:13px;color:#b8c2d8;margin:12px 0 6px}
+input,select,button{width:100%;padding:13px;border-radius:12px;border:1px solid #303d5b;background:#0b1426;color:#fff;font-size:16px}
+button{margin-top:14px;border:0;background:#3478f6;font-weight:800}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.metric{background:#0b1426;padding:12px;border-radius:12px}.metric span{display:block;color:#98a5c0;font-size:12px}.metric b{font-size:18px;display:block;margin-top:4px}
+.signal{font-size:29px;font-weight:900;margin:7px 0}.buy{color:#50e69a}.sell{color:#ff7181}.wait{color:#ffd166}
+.status{margin-top:10px;font-size:13px}.good{color:#50e69a}.bad{color:#ff7181}
+ul{padding-left:20px;color:#cbd4e7;font-size:14px;line-height:1.55}
+a{color:#83aefc}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="card">
+<h1>Live Forex Scanner</h1>
+<div class="muted">iPhone-friendly market-data scanner • decision support only</div>
+</div>
+
+<div class="card">
+<label>Twelve Data API key</label>
+<input id="key" type="password" placeholder="Paste your API key">
+<div class="small" style="margin-top:8px">Your key is stored only in this browser on your device. Do not share it publicly.</div>
+<div class="small" style="margin-top:8px">Get a key from <a href="https://twelvedata.com" target="_blank">Twelve Data</a>. Its current free/basic offering includes forex data, subject to its usage limits. citeturn0search0</div>
+
+<label>Market</label>
+<select id="symbol">
+<option value="EUR/USD">EUR/USD</option><option value="GBP/USD">GBP/USD</option>
+<option value="USD/JPY">USD/JPY</option><option value="USD/CHF">USD/CHF</option>
+<option value="AUD/USD">AUD/USD</option><option value="USD/CAD">USD/CAD</option>
+<option value="NZD/USD">NZD/USD</option><option value="XAU/USD">XAU/USD (Gold)</option>
+</select>
+<label>Timeframe</label>
+<select id="interval"><option value="15min">15 minutes</option><option value="30min">30 minutes</option><option value="1h">1 hour</option><option value="4h">4 hours</option></select>
+<button onclick="scan()">SCAN LIVE MARKET</button>
+<div id="status" class="status"></div>
+</div>
+
+<div class="card" id="result">
+<div class="muted">Scanner result</div>
+<div class="signal wait">READY</div>
+<div class="small">Enter your API key, select a market and scan.</div>
+</div>
+
+<div class="card">
+<b>What it checks</b>
+<ul>
+<li>EMA 20 / 50 / 200 trend alignment</li>
+<li>RSI 14 momentum</li>
+<li>MACD momentum</li>
+<li>ATR-based stop-loss and take-profit levels</li>
+<li>Multi-factor agreement before showing BUY or SELL</li>
+</ul>
+<div class="small">The score is indicator agreement, not a probability of winning. This scanner does not place trades automatically.</div>
+</div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+$("key").value=localStorage.getItem("td_key")||"";
+$("key").addEventListener("change",()=>localStorage.setItem("td_key",$("key").value.trim()));
+
+function ema(values,period){
+ let k=2/(period+1), out=new Array(values.length).fill(null);
+ if(values.length<period)return out;
+ let s=0; for(let i=0;i<period;i++)s+=values[i];
+ out[period-1]=s/period;
+ for(let i=period;i<values.length;i++)out[i]=values[i]*k+out[i-1]*(1-k);
+ return out;
+}
+function rsi(values,period=14){
+ let out=new Array(values.length).fill(null); if(values.length<=period)return out;
+ let gain=0,loss=0;
+ for(let i=1;i<=period;i++){let d=values[i]-values[i-1];gain+=Math.max(d,0);loss+=Math.max(-d,0);}
+ let ag=gain/period,al=loss/period; out[period]=al===0?100:100-100/(1+ag/al);
+ for(let i=period+1;i<values.length;i++){
+   let d=values[i]-values[i-1],g=Math.max(d,0),l=Math.max(-d,0);
+   ag=(ag*(period-1)+g)/period;al=(al*(period-1)+l)/period;
+   out[i]=al===0?100:100-100/(1+ag/al);
+ }
+ return out;
+}
+function atr(candles,period=14){
+ if(candles.length<=period)return new Array(candles.length).fill(null);
+ let tr=[]; for(let i=0;i<candles.length;i++){
+   if(i===0)tr.push(candles[i].h-candles[i].l);
+   else tr.push(Math.max(candles[i].h-candles[i].l,Math.abs(candles[i].h-candles[i-1].c),Math.abs(candles[i].l-candles[i-1].c)));
+ }
+ let out=new Array(candles.length).fill(null),v=0;for(let i=0;i<period;i++)v+=tr[i];
+ v/=period;out[period-1]=v;
+ for(let i=period;i<tr.length;i++){v=(v*(period-1)+tr[i])/period;out[i]=v}
+ return out;
+}
+function macd(values){
+ const e12=ema(values,12),e26=ema(values,26),line=values.map((_,i)=>e12[i]!=null&&e26[i]!=null?e12[i]-e26[i]:null);
+ const clean=line.filter(x=>x!=null),s9=ema(clean,9), signal=new Array(values.length).fill(null);
+ let j=0;for(let i=0;i<line.length;i++)if(line[i]!=null){signal[i]=s9[j++];}
+ return {line,signal};
+}
+function decimals(symbol){return symbol==="USD/JPY"?3:(symbol==="XAU/USD"?2:5)}
+function fmt(x,s){return Number.isFinite(x)?x.toFixed(s):"-"}
+
+async function scan(){
+ const key=$("key").value.trim(),symbol=$("symbol").value,interval=$("interval").value;
+ if(!key){$("status").innerHTML='<span class="bad">Enter your Twelve Data API key first.</span>';return}
+ localStorage.setItem("td_key",key);
+ $("status").innerHTML="Loading live candles…";
+ $("result").innerHTML='<div class="muted">Scanner result</div><div class="signal wait">SCANNING…</div>';
+ try{
+   const url=`https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}&outputsize=250&apikey=${encodeURIComponent(key)}`;
+   const res=await fetch(url); const data=await res.json();
+   if(!res.ok || data.status==="error" || !data.values) throw new Error(data.message||"Market data request failed.");
+   const c=data.values.slice().reverse().map(x=>({o:+x.open,h:+x.high,l:+x.low,c:+x.close}));
+   if(c.length<210)throw new Error("Not enough candles returned for EMA 200.");
+   const closes=c.map(x=>x.c), e20=ema(closes,20),e50=ema(closes,50),e200=ema(closes,200),rs=rsi(closes),at=atr(c),mc=macd(closes);
+   const i=closes.length-1,price=closes[i],v20=e20[i],v50=e50[i],v200=e200[i],vr=rs[i],va=at[i],vm=mc.line[i],vs=mc.signal[i];
+   let bull=0,bear=0,reasons=[];
+   if(v20>v50){bull++;reasons.push("EMA 20 is above EMA 50.");}else{bear++;reasons.push("EMA 20 is below EMA 50.");}
+   if(v50>v200){bull++;reasons.push("EMA 50 is above EMA 200.");}else{bear++;reasons.push("EMA 50 is below EMA 200.");}
+   if(price>v200){bull++;reasons.push("Price is above EMA 200.");}else{bear++;reasons.push("Price is below EMA 200.");}
+   if(vr>=50&&vr<70){bull++;reasons.push("RSI supports bullish momentum.");}
+   else if(vr<=50&&vr>30){bear++;reasons.push("RSI supports bearish momentum.");}
+   else reasons.push("RSI is outside the preferred momentum zone.");
+   if(vm>vs){bull++;reasons.push("MACD is above its signal.");}else{bear++;reasons.push("MACD is below its signal.");}
+   let side="NO TRADE",cls="wait",score=Math.round(Math.max(bull,bear)/5*100);
+   if(bull>=4){side="BUY";cls="buy"}else if(bear>=4){side="SELL";cls="sell"}
+   const sl=side==="BUY"?price-1.5*va:side==="SELL"?price+1.5*va:null;
+   const tp=side==="BUY"?price+3*va:side==="SELL"?price-3*va:null;
+   const d=decimals(symbol);
+   $("status").innerHTML='<span class="good">Live data loaded.</span>';
+   $("result").innerHTML=`<div class="muted">${symbol} • ${interval} • latest candle</div>
+   <div class="signal ${cls}">${side}</div>
+   <div class="grid">
+   <div class="metric"><span>Agreement score</span><b>${score}%</b></div>
+   <div class="metric"><span>Price</span><b>${fmt(price,d)}</b></div>
+   <div class="metric"><span>EMA 20</span><b>${fmt(v20,d)}</b></div>
+   <div class="metric"><span>EMA 50</span><b>${fmt(v50,d)}</b></div>
+   <div class="metric"><span>EMA 200</span><b>${fmt(v200,d)}</b></div>
+   <div class="metric"><span>RSI</span><b>${fmt(vr,1)}</b></div>
+   <div class="metric"><span>Suggested SL</span><b>${sl?fmt(sl,d):"-"}</b></div>
+   <div class="metric"><span>Suggested TP</span><b>${tp?fmt(tp,d):"-"}</b></div>
+   </div><p class="small">Reasons</p><ul>${reasons.map(x=>`<li>${x}</li>`).join("")}</ul>
+   <div class="small">Data is market-feed data, which may differ from your Deriv/MT5 broker quote. Verify the setup in MT5 before trading.</div>`;
+ }catch(e){
+   $("status").innerHTML=`<span class="bad">${e.message}</span>`;
+   $("result").innerHTML='<div class="muted">Scanner result</div><div class="signal wait">ERROR</div><div class="small">Check your API key, internet connection and market selection.</div>';
+ }
+}
+</script>
+</body>
+</html>
